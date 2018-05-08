@@ -722,6 +722,7 @@ out:
 	sock_put(sk);
 }
 
+/* 注册TCP定时器入口函数 */
 void tcp_init_xmit_timers(struct sock *sk)
 {
 	inet_csk_init_xmit_timers(sk, &tcp_write_timer, &tcp_delack_timer,

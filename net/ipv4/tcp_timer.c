@@ -421,6 +421,14 @@ static void tcp_fastopen_synack_timer(struct sock *sk)
  *
  *  Returns: Nothing (void)
  */
+
+/*
+ * 数据重传 tcp_retransmi
+ *
+ *
+ *
+ *
+ */
 void tcp_retransmit_timer(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -568,15 +576,22 @@ void tcp_write_timer_handler(struct sock *sk)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int event;
 
+	/*
+	 * 套接字已经是关闭状态，或者无需执行时，直接退出
+	 * icsk_pending表示重传定时器要做的事情：目前是重传和窗口探测。如果为0，表示没有要作的事情
+	 */
 	if (((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN)) ||
 	    !icsk->icsk_pending)
 		goto out;
+
+        /* 未到超时时间，则重新设置重传定时器 */
 
 	if (time_after(icsk->icsk_timeout, jiffies)) {
 		sk_reset_timer(sk, &icsk->icsk_retransmit_timer, icsk->icsk_timeout);
 		goto out;
 	}
 
+	/* 获取当前的事件，在下面的执行过程中，则机将事件清零 */
 	event = icsk->icsk_pending;
 
 	switch (event) {
@@ -600,12 +615,26 @@ out:
 	sk_mem_reclaim(sk);
 }
 
+
+/*
+ * TCP的重传定时器，时间动态计算，取决于TCP为该链接测量出的往返时间和被重传过的次数
+ *
+ */
 static void tcp_write_timer(unsigned long data)
 {
 	struct sock *sk = (struct sock *)data;
 
 	bh_lock_sock(sk);
+
+	/*
+	 * sock_owned_by_user:
+	 * 传输控制块被用户锁定,则本次放弃，重新设置定时器
+         * 用户锁定的意思是 sk->sk_lock.owned为true,如果为true，则有进程或者用户在操作sk
+	 */
+
 	if (!sock_owned_by_user(sk)) {
+
+		/* 套接字没有用户进程在使用 */
 		tcp_write_timer_handler(sk);
 	} else {
 		/* delegate our work to tcp_release_cb() */

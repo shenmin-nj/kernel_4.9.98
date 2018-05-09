@@ -421,6 +421,14 @@ static void tcp_fastopen_synack_timer(struct sock *sk)
  *
  *  Returns: Nothing (void)
  */
+
+/*
+ * 数据重传 tcp_retransmi
+ *
+ *
+ *
+ *
+ */
 void tcp_retransmit_timer(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -450,6 +458,9 @@ void tcp_retransmit_timer(struct sock *sk)
 		 * connection. If the socket is an orphan, time it out,
 		 * we cannot allow such beasts to hang infinitely.
 		 */
+
+		/* 意外场景，重传时发现发送窗口为0 */
+
 		struct inet_sock *inet = inet_sk(sk);
 		if (sk->sk_family == AF_INET) {
 			net_dbg_ratelimited("Peer %pI4:%u/%u unexpectedly shrunk window %u:%u (repaired)\n",
@@ -467,22 +478,42 @@ void tcp_retransmit_timer(struct sock *sk)
 					    tp->snd_una, tp->snd_nxt);
 		}
 #endif
+		/* 
+		 * 如果TCP_RTO_MAX时间未收到对端消息，则设置TCP套接字为错误状态 
+		 * TCP_RTO_MAX=120*HZ,正常情况为120s
+          	 */
+
 		if (tcp_time_stamp - tp->rcv_tstamp > TCP_RTO_MAX) {
 			tcp_write_err(sk);
 			goto out;
 		}
+		
+		/*
+		 * TCP进入loss状态 
+		 * 
+		 * 当sender收到一个ack时，Linux TCP通过状态机(state)来决定发送行为，是应该降低cwnd呢，还是保持cwnd不变，还是继续增加cwnd，这很重要。
+		 * 如果处理不当，可能会导致丢包或者timeout。
+		 * 主要有五种状态，分别是：Open，Disorder，CWR，Recovery和Loss
+		 * 
+		 * https://pdfs.semanticscholar.org/0e9c/968d09ab2e53e24c4dca5b2d67c7f7140f8e.pdf
+		 */ 
+
 		tcp_enter_loss(sk);
+
+		/* 重传发送队列中的第一个报文，即未确认到的第一个报文 */
+
 		tcp_retransmit_skb(sk, tcp_write_queue_head(sk), 1);
 		__sk_dst_reset(sk);
 		goto out_reset_timer;
 	}
 
+	/* 发送超时的处理 */
 	if (tcp_write_timeout(sk))
 		goto out;
 
 	if (icsk->icsk_retransmits == 0) {
 		int mib_idx;
-
+                /* 流控状态下的统计数据更新 */
 		if (icsk->icsk_ca_state == TCP_CA_Recovery) {
 			if (tcp_is_sack(tp))
 				mib_idx = LINUX_MIB_TCPSACKRECOVERYFAIL;
@@ -504,10 +535,15 @@ void tcp_retransmit_timer(struct sock *sk)
 
 	tcp_enter_loss(sk);
 
+	/* 重传发送队列中的第一个报文*/
+
 	if (tcp_retransmit_skb(sk, tcp_write_queue_head(sk), 1) > 0) {
 		/* Retransmission failed because of local congestion,
 		 * do not backoff.
 		 */
+
+		/*因为本地拥塞而重传失败，则无需backoff定时器*/
+
 		if (!icsk->icsk_retransmits)
 			icsk->icsk_retransmits = 1;
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
@@ -544,6 +580,16 @@ out_reset_timer:
 	 * exponential backoff behaviour to avoid continue hammering
 	 * linear-timeout retransmissions into a black hole
 	 */
+
+	/*
+	 * 满足下面条件时，使用线性超时时间，即每次超时的时间都是一样的
+	 * 1.连接是已经连接状态
+	 * 2.套接字配置了线性超时选项或者系统配置了线性超时
+	 * 3.当前tcp时一个thin的，即低速的tcp连接
+	 * 4.超时个数小于指定值
+	 *
+	 */
+
 	if (sk->sk_state == TCP_ESTABLISHED &&
 	    (tp->thin_lto || sysctl_tcp_thin_linear_timeouts) &&
 	    tcp_stream_is_thin(tp) &&
@@ -552,9 +598,17 @@ out_reset_timer:
 		icsk->icsk_rto = min(__tcp_set_rto(tp), TCP_RTO_MAX);
 	} else {
 		/* Use normal (exponential) backoff */
+		
+		/* 正常指数后退超时 */
+
 		icsk->icsk_rto = min(icsk->icsk_rto << 1, TCP_RTO_MAX);
 	}
+
+	/* 重新设置超时定时期*/
+	 
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, icsk->icsk_rto, TCP_RTO_MAX);
+
+	/* 连重传都超时了，则重新设定套接字的下一跳，这样后面可以重新选择路由，避免因为路由问题导致报文无法送到对端 */
 	if (retransmits_timed_out(sk, net->ipv4.sysctl_tcp_retries1 + 1, 0, 0))
 		__sk_dst_reset(sk);
 
@@ -568,15 +622,22 @@ void tcp_write_timer_handler(struct sock *sk)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int event;
 
+	/*
+	 * 套接字已经是关闭状态，或者无需执行时，直接退出
+	 * icsk_pending表示重传定时器要做的事情：目前是重传和窗口探测。如果为0，表示没有要作的事情
+	 */
 	if (((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN)) ||
 	    !icsk->icsk_pending)
 		goto out;
+
+        /* 未到超时时间，则重新设置重传定时器 */
 
 	if (time_after(icsk->icsk_timeout, jiffies)) {
 		sk_reset_timer(sk, &icsk->icsk_retransmit_timer, icsk->icsk_timeout);
 		goto out;
 	}
 
+	/* 获取当前的事件，在下面的执行过程中，则机将事件清零 */
 	event = icsk->icsk_pending;
 
 	switch (event) {
@@ -600,12 +661,26 @@ out:
 	sk_mem_reclaim(sk);
 }
 
+
+/*
+ * TCP的重传定时器，时间动态计算，取决于TCP为该链接测量出的往返时间和被重传过的次数
+ *
+ */
 static void tcp_write_timer(unsigned long data)
 {
 	struct sock *sk = (struct sock *)data;
 
 	bh_lock_sock(sk);
+
+	/*
+	 * sock_owned_by_user:
+	 * 传输控制块被用户锁定,则本次放弃，重新设置定时器
+         * 用户锁定的意思是 sk->sk_lock.owned为true,如果为true，则有进程或者用户在操作sk
+	 */
+
 	if (!sock_owned_by_user(sk)) {
+
+		/* 套接字没有用户进程在使用 */
 		tcp_write_timer_handler(sk);
 	} else {
 		/* delegate our work to tcp_release_cb() */
@@ -722,6 +797,7 @@ out:
 	sock_put(sk);
 }
 
+/* 注册TCP定时器入口函数 */
 void tcp_init_xmit_timers(struct sock *sk)
 {
 	inet_csk_init_xmit_timers(sk, &tcp_write_timer, &tcp_delack_timer,

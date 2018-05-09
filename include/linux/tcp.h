@@ -140,17 +140,22 @@ static inline struct tcp_request_sock *tcp_rsk(const struct request_sock *req)
 	return (struct tcp_request_sock *)req;
 }
 
+
+/* REF:                     https://blog.csdn.net/shanshanpt/article/details/21798421 */ 
+
+/* REF(强烈推荐仔细阅读:  http://www.tcpipguide.com/free/t_TCPSlidingWindowDataTransferandAcknowledgementMech-5.htm */
+
 struct tcp_sock {
 	/* inet_connection_sock has to be the first member of tcp_sock */
 	struct inet_connection_sock	inet_conn;
 	u16	tcp_header_len;	/* Bytes of tcp header to send		*/
-	u16	gso_segs;	/* Max number of segs per GSO packet	*/
+	u16	gso_segs;	/* Max number of segs per GSO packet 分段数据包的数量	*/
 
 /*
  *	Header prediction flags
  *	0x5?10 << 16 + snd_wnd in net byte order
  */
-	__be32	pred_flags;
+	__be32	pred_flags; //头部预留位置，用于检测头部标识处理ACK和PUSH之外还有没有其它位，从而判断是不是可以使用快速路径处理数据???
 
 /*
  *	RFC793 variables by their proper names. This means you can
@@ -167,9 +172,9 @@ struct tcp_sock {
 	u32	data_segs_in;	/* RFC4898 tcpEStatsPerfDataSegsIn
 				 * total number of data segments in.
 				 */
- 	u32	rcv_nxt;	/* What we want to receive next 	*/
-	u32	copied_seq;	/* Head of yet unread data		*/
-	u32	rcv_wup;	/* rcv_nxt on last window update sent	*/
+ 	u32	rcv_nxt;	/* What we want to receive next               下一个想要收到的第一个数据的字节编号	*/
+	u32	copied_seq;	/* Head of yet unread data		      还没有读出的数据的头                      */
+	u32	rcv_wup;	/* rcv_nxt on last window update sent	      */
  	u32	snd_nxt;	/* Next sequence we send		*/
 	u32	segs_out;	/* RFC4898 tcpEStatsPerfSegsOut
 				 * The total number of segments sent.

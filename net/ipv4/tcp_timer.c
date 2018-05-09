@@ -459,7 +459,13 @@ void tcp_retransmit_timer(struct sock *sk)
 		 * we cannot allow such beasts to hang infinitely.
 		 */
 
-		/* 意外场景，重传时发现发送窗口为0 */
+		/*
+		 *
+		 * 意外场景，重传时发现发送窗口为0 
+                 * snd_wnd 是发送窗口的大小，自于对端的tcp数据的首部
+		 * 例如: tcp_ack_update_window 中 u32 win = ntohs(tcp_hdr(skb)->window)
+		 *
+		 */
 
 		struct inet_sock *inet = inet_sk(sk);
 		if (sk->sk_family == AF_INET) {

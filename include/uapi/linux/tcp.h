@@ -123,9 +123,9 @@ struct tcp_repair_opt {
 };
 
 struct tcp_repair_window {
-	__u32	snd_wl1;
-	__u32	snd_wnd;
-	__u32	max_window;
+	__u32	snd_wl1;    /* 记录发送窗口时更新，造成窗口更新的哪个ACK数据报的第一个序号,主要用在下一次判断是否需要更新发送窗口 */
+	__u32	snd_wnd;    /* 发送窗口的大小，直接取值来自于对端的数据报的TCP首部 */ 
+	__u32	max_window; /* 记录来自对端通知的窗口的最大值*/
 
 	__u32	rcv_wnd;
 	__u32	rcv_wup;

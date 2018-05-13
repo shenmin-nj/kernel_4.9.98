@@ -28,7 +28,13 @@
 #include <net/xfrm.h>
 
 int sysctl_tcp_abort_on_overflow __read_mostly;
-
+/*
+ *
+ * struct inet_timewait_death_row类型的变量tcp_death_row来保存所有的tw状态的socket。
+ * 而整个tw状态的socket并不是全部加入到定时器中，而是将tcp_death_row加入到定时器中，
+ * 然后每次定时器超时通过tcp_death_row来查看定时器的超时情况，从而处理tw状态的sock。 
+ *
+ */
 struct inet_timewait_death_row tcp_death_row = {
 	.sysctl_max_tw_buckets = NR_FILE * 2,
 	.hashinfo	= &tcp_hashinfo,

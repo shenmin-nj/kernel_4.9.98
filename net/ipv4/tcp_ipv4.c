@@ -136,6 +136,9 @@ int tcp_twsk_unique(struct sock *sk, struct sock *sktw, void *twp)
 EXPORT_SYMBOL_GPL(tcp_twsk_unique);
 
 /* This will initiate an outgoing connection. */
+
+/* TCP 三次握手建立连接的入口函数,发送SYN */
+
 int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
 	struct sockaddr_in *usin = (struct sockaddr_in *)uaddr;
@@ -166,6 +169,14 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	orig_sport = inet->inet_sport;
 	orig_dport = usin->sin_port;
 	fl4 = &inet->cork.fl.u.ip4;
+	/*
+	 * ip_route_connect根据下一跳地址等信息查找目的路由缓存项
+	 * 如果缓存查找名中，则生成一个相应的路由缓存项
+	 * 这个缓存项不但可以用于发送当前的SYN，后面的报文
+	 * 发送过程中，也可以用于路由加速查找
+	 *
+	 *
+	 */
 	rt = ip_route_connect(fl4, nexthop, inet->inet_saddr,
 			      RT_CONN_FLAGS(sk), sk->sk_bound_dev_if,
 			      IPPROTO_TCP,
@@ -177,18 +188,39 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		return err;
 	}
 
+	/* 组播或者多播的路由缓存项，TCP不支持*/
 	if (rt->rt_flags & (RTCF_MULTICAST | RTCF_BROADCAST)) {
 		ip_rt_put(rt);
 		return -ENETUNREACH;
 	}
 
+       /*
+	*源路由的用户可以指定他所发送的数据包沿途经过的部分或者全部路由器。
+	*它区别于由主机或者路由器的互联层（IP）软件自行选择路由后得出的路径。
+	*
+	* https://en.wikipedia.org/wiki/Source_routing
+	* 
+	* 如果没有开启源路由，则使用获取到的路由缓存项中的地址
+	*/
+	
 	if (!inet_opt || !inet_opt->opt.srr)
 		daddr = fl4->daddr;
+
+	/*
+	 * 如果没有设置源地址，则使用路由缓存项中的源地址对其进行设置
+	 * 说明发送请求可以不指定源地址，通过路由缓存找到对应的ip
+	 *
+	 */
 
 	if (!inet->inet_saddr)
 		inet->inet_saddr = fl4->saddr;
 	sk_rcv_saddr_set(sk, inet->inet_saddr);
 
+	/*
+	 * 这里表明，如果时间戳不为0且目的地址不等于当前目的地址
+	 * 说明传输控制块之前已建立连接并通信过，需要重新初始化
+	 *
+	 */
 	if (tp->rx_opt.ts_recent_stamp && inet->inet_daddr != daddr) {
 		/* Reset inherited state */
 		tp->rx_opt.ts_recent	   = 0;
@@ -196,6 +228,20 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		if (likely(!tp->repair))
 			tp->write_seq	   = 0;
 	}
+        
+	/* 如果开启了time wait recycle并接收过时间戳选项
+	 * 调用tcp_fetch_timewait_stamp函数，从对端信息中初始化ts_recent_stamp和ts_recent
+	 * 开启time_wait的recycle选项在NAT场景有问题，这里也是性能和可能有问题的平衡
+	 *
+	 */
+
+        /*
+         *
+         * struct inet_timewait_death_row类型的变量tcp_death_row来保存所有的tw状态的socket。
+         * 而整个tw状态的socket并不是全部加入到定时器中，而是将tcp_death_row加入到定时器中，
+         * 然后每次定时器超时通过tcp_death_row来查看定时器的超时情况，从而处理tw状态的sock。 
+         *
+         */
 
 	if (tcp_death_row.sysctl_tw_recycle &&
 	    !tp->rx_opt.ts_recent_stamp && fl4->daddr == daddr)
@@ -215,8 +261,13 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	 * lock select source port, enter ourselves into the hash tables and
 	 * complete initialization after this.
 	 */
+
+	/* 状态跳转为 SYN_SENT */
 	tcp_set_state(sk, TCP_SYN_SENT);
+
+	/* 下面的函数会随机找一个端口, 之所以传递tcp_death_row，就是根据tw_recycle中的设置，决定随机端口是否可以用*/
 	err = inet_hash_connect(&tcp_death_row, sk);
+
 	if (err)
 		goto failure;
 

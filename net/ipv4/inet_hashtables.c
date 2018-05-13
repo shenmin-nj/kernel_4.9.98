@@ -545,18 +545,22 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 	struct inet_hashinfo *hinfo = death_row->hashinfo;
 	struct inet_timewait_sock *tw = NULL;
 	struct inet_bind_hashbucket *head;
-	int port = inet_sk(sk)->inet_num;
+	int port = inet_sk(sk)->inet_num;/*本地端口*/
 	struct net *net = sock_net(sk);
 	struct inet_bind_bucket *tb;
 	u32 remaining, offset;
 	int ret, i, low, high;
 	static u32 hint;
 
+	//如果指定了端口(port!=0)，则走指定端口流程
 	if (port) {
+
+                /* 根据端口号，找到所在的hash桶*/
 		head = &hinfo->bhash[inet_bhashfn(net, port,
 						  hinfo->bhash_size)];
 		tb = inet_csk(sk)->icsk_bind_hash;
-		spin_lock_bh(&head->lock);
+		spin_lock_bh(&head->lock);//锁主hash桶
+
 		if (sk_head(&tb->owners) == sk && !sk->sk_bind_node.next) {
 			inet_ehash_nolisten(sk, NULL);
 			spin_unlock_bh(&head->lock);
@@ -569,6 +573,10 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 		return ret;
 	}
 
+	/*
+	 *获取端口的范围,low和high是下限和上限，remaing表示可用的端口数
+	 *
+	 */
 	inet_get_local_port_range(net, &low, &high);
 	high++; /* [32768, 60999] -> [32768, 61000[ */
 	remaining = high - low;
@@ -652,6 +660,11 @@ int inet_hash_connect(struct inet_timewait_death_row *death_row,
 		      struct sock *sk)
 {
 	u32 port_offset = 0;
+       
+	/*
+	 * 根据源IP、目的IP、目的端口，采用MD5计算出一个随机数，作为端口的初始偏移值
+	 * __inet_check_established: 判断正在使用中的端口是否允许重用
+	 */
 
 	if (!inet_sk(sk)->inet_num)
 		port_offset = inet_sk_port_offset(sk);

@@ -602,6 +602,15 @@ other_parity_scan:
 		/* Does not bother with rcv_saddr checks, because
 		 * the established check is already unique enough.
 		 */
+
+		/* 在hash中检查当前端口是否可以被复用
+		 *
+		 *
+		 *
+		 *
+		 *
+		 *
+		 */
 		inet_bind_bucket_for_each(tb, &head->chain) {
 			if (net_eq(ib_net(tb), net) && tb->port == port) {
 				if (tb->fastreuse >= 0 ||

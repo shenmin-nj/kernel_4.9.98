@@ -637,14 +637,18 @@ struct sk_buff {
 			struct sk_buff		*next;
 			struct sk_buff		*prev;
 
+                        /*报文到达或者离开的时间戳*/
 			union {
 				ktime_t		tstamp;
 				struct skb_mstamp skb_mstamp;
 			};
+
 		};
 		struct rb_node	rbnode; /* used in netem & tcp stack */
 	};
 	struct sock		*sk;
+
+	/*接受或者发送报文的网络设备*/
 	struct net_device	*dev;
 
 	/*

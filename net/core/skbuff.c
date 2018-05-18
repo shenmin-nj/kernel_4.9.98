@@ -200,14 +200,31 @@ out:
  *	Buffers may only be allocated from interrupts using a @gfp_mask of
  *	%GFP_ATOMIC.
  */
+
+/*
+ * SKB 的分配时机主要有两种,最常见的一种是在网卡的中断中,有数据包到达的时,
+ *
+ * 系统分配 SKB 包进行包处理; 第二种情况是主动分配 SKB 包用于各种调试或者其他处理环境.
+ *
+ */
+
+/*
+ * 内存布局参考: http://vger.kernel.org/~davem/skb_data.html
+ */
+
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			    int flags, int node)
 {
+	/* size表示实际需要处理的数据的大小， node 表示 NUMA 结点 */
+
 	struct kmem_cache *cache;
 	struct skb_shared_info *shinfo;
 	struct sk_buff *skb;
 	u8 *data;
 	bool pfmemalloc;
+
+	/* 如果不是clone的，则使用skbuff_head_cache,其长度为 sizeof(sk_buff) */
+	/* 如果时clone，则使用 skbuff_fclone_cache,其长度为2*sizeof(sk_buff)+4 */
 
 	cache = (flags & SKB_ALLOC_FCLONE)
 		? skbuff_fclone_cache : skbuff_head_cache;
@@ -215,7 +232,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	if (sk_memalloc_socks() && (flags & SKB_ALLOC_RX))
 		gfp_mask |= __GFP_MEMALLOC;
 
-	/* Get the HEAD */
+	/* Get the HEAD 分配一个sk_buff结构的空间，前面指针指向的skbuff_head_cache没有分配么？？*/
 	skb = kmem_cache_alloc_node(cache, gfp_mask & ~__GFP_DMA, node);
 	if (!skb)
 		goto out;

@@ -648,7 +648,7 @@ struct sk_buff {
 	};
 	struct sock		*sk;
 
-	/*接受或者发送报文的网络设备*/
+	/*接受或者发送报文的网络设备, 和iif不同，如果被virtural driver处理，dev会发生变化*/
 	struct net_device	*dev;
 
 	/*
@@ -670,8 +670,8 @@ struct sk_buff {
 #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
 	struct nf_bridge_info	*nf_bridge;
 #endif
-	unsigned int		len,
-				data_len;
+	unsigned int		len,     /*data buffer中的数据的总长度*/
+				data_len;  
 	__u16			mac_len,
 				hdr_len;
 

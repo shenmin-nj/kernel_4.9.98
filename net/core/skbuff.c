@@ -158,6 +158,7 @@ out:
  *
  */
 
+/*这个函数的外部函数 alloc_skb_head 没有调用者 */
 struct sk_buff *__alloc_skb_head(gfp_t gfp_mask, int node)
 {
 	struct sk_buff *skb;
@@ -225,14 +226,16 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 
 	/* 如果不是clone的，则使用skbuff_head_cache,其长度为 sizeof(sk_buff) */
 	/* 如果时clone，则使用 skbuff_fclone_cache,其长度为2*sizeof(sk_buff)+4 */
-
+        /* 这两块高速缓存时在skb_init阶段申请的 */
 	cache = (flags & SKB_ALLOC_FCLONE)
 		? skbuff_fclone_cache : skbuff_head_cache;
 
 	if (sk_memalloc_socks() && (flags & SKB_ALLOC_RX))
 		gfp_mask |= __GFP_MEMALLOC;
 
-	/* Get the HEAD 分配一个sk_buff结构的空间，前面指针指向的skbuff_head_cache没有分配么？？*/
+	/* Get the HEAD 分配一个sk_buff结构的空间，如果从高速缓存中申请失败，则从kmalloc中申请*/
+        /* 去除在DMA内存中分配，因为DMA的内存比较小，且有特定的作用，不用来分配skb*/
+
 	skb = kmem_cache_alloc_node(cache, gfp_mask & ~__GFP_DMA, node);
 	if (!skb)
 		goto out;
@@ -243,6 +246,9 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	 * aligned memory blocks, unless SLUB/SLAB debug is enabled.
 	 * Both skb->head and skb_shared_info are cache line aligned.
 	 */
+
+	/*看参考资料中的内存布局，就知道为为何是 size+sizeof(skb_shared_info),只是纳闷 head room 和 tail room 跑哪去了*/
+
 	size = SKB_DATA_ALIGN(size);
 	size += SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	data = kmalloc_reserve(size, gfp_mask, node, &pfmemalloc);
@@ -253,6 +259,8 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	 * to allow max possible filling before reallocation.
 	 */
 	size = SKB_WITH_OVERHEAD(ksize(data));
+	
+	/* 写预取，提前放到cache中 ,为何放高地址端???*/
 	prefetchw(data + size);
 
 	/*
@@ -260,6 +268,9 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	 * actually initialise below. Hence, don't put any more fields after
 	 * the tail pointer in struct sk_buff!
 	 */
+
+	/*只清除要清除的内存,有些既然要显式复制的地方，都舍不得memset*/
+
 	memset(skb, 0, offsetof(struct sk_buff, tail));
 	/* Account for allocated memory : skb + skb->head */
 	skb->truesize = SKB_TRUESIZE(size);

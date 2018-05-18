@@ -74,9 +74,11 @@ extern inline void prefetch(const void *ptr)
 	__builtin_prefetch(ptr, 0, 3);
 }
 
+/* http://gcc.gnu.org/onlinedocs/gcc-4.6.2/gcc/Other-Builtins.html#Other-Builtins */
+
 extern inline void prefetchw(const void *ptr)  
 {
-	__builtin_prefetch(ptr, 1, 3);
+	__builtin_prefetch(ptr, 1, 3); //1表示写预取，具体见上面链接*/
 }
 
 #ifdef CONFIG_SMP
